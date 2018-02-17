@@ -21,23 +21,33 @@ pub enum Expr {
     },
 }
 
+const ANONYMOUS_FUNCTION_NAME: &str = "__MAIN__";
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct Prototype {
-    name: String,
-    args: Vec<String>,
+    pub(crate) name: String,
+    pub(crate) args: Vec<String>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Function {
-    proto: Box<Prototype>,
-    body: Box<Expr>,
+    pub(crate) proto: Box<Prototype>,
+    pub(crate) body: Box<Expr>,
+    pub(crate) is_anonymous: bool,
 }
 
 impl Function {
-    pub fn new(proto: Box<Prototype>, body: Box<Expr>) -> Self {
+    pub fn is_anonymous(&self) -> bool {
+        self.is_anonymous
+    }
+}
+
+impl Function {
+    pub fn new(proto: Box<Prototype>, body: Box<Expr>, is_anonymous: bool) -> Self {
         Function {
             proto: proto,
             body: body,
+            is_anonymous: is_anonymous,
         }
     }
 }
@@ -88,8 +98,12 @@ impl<'a> Parser<'a> {
         self.get_next_token();
         let v = self.parse_expression()?;
         match self.current {
-            Some(Token::ClosingParenthesis) => Ok(v),
-            ref x => unexpected!("')'", x),
+            Some(Token::ClosingParenthesis) => {
+                // eat `)`
+                self.get_next_token();
+                Ok(v)
+            }
+            ref x => unexpected!("`)`", x),
         }
     }
 
@@ -105,14 +119,12 @@ impl<'a> Parser<'a> {
 
         if Some(Token::OpeningParenthesis) == self.current {
             let mut args = Vec::new();
+            self.get_next_token();
             loop {
                 let arg = self.parse_expression()?;
                 args.push(arg);
                 if self.current == Some(Token::ClosingParenthesis) {
                     break;
-                }
-                if self.current != Some(Token::Comma) {
-                    return unexpected!("')' or ',' in argument list", self.current);
                 }
             }
             Ok(Box::new(Expr::Call {
@@ -138,7 +150,7 @@ impl<'a> Parser<'a> {
     }
 
     /// binoprhs
-    ///   ::= ('+' primary)*
+    ///   ::= (op primary)*
     fn parse_bin_op_rhs(&mut self, prec: u8, mut lhs: Box<Expr>) -> Result<Box<Expr>, String> {
         loop {
             let op = match self.current {
@@ -210,7 +222,7 @@ impl<'a> Parser<'a> {
                     return Ok(Box::new(Prototype::new(fn_name, arg_names)));
                 }
                 _ => {
-                    return unexpected!("',' or ')'", self.current);
+                    return unexpected!("expression or `)`", self.current);
                 }
             }
         }
@@ -223,7 +235,7 @@ impl<'a> Parser<'a> {
 
         let proto = self.parse_prototype()?;
         let body = self.parse_expression()?;
-        Ok(Box::new(Function::new(proto, body)))
+        Ok(Box::new(Function::new(proto, body, false)))
     }
 
     /// external ::= 'extern' prototype
@@ -235,9 +247,32 @@ impl<'a> Parser<'a> {
 
     /// toplevelexpr ::= expression
     pub fn parse_top_level(&mut self) -> Result<Box<Function>, String> {
-        let proto = Box::new(Prototype::new(String::new(), Vec::new()));
+        let proto = Box::new(Prototype::new(
+            ANONYMOUS_FUNCTION_NAME.to_string(),
+            Vec::new(),
+        ));
         let body = self.parse_expression()?;
-        Ok(Box::new(Function::new(proto, body)))
+        Ok(Box::new(Function::new(proto, body, true)))
+    }
+
+    pub fn parse(&mut self) -> Result<Box<Function>, String> {
+        let result = match self.current {
+            Some(Token::Def) => self.parse_definition(),
+            Some(Token::Extern) => {
+                let proto = self.parse_extern()?;
+                Ok(Box::new(Function::new(
+                    proto,
+                    Box::new(Expr::Number(::std::f64::NAN)),
+                    false,
+                )))
+            }
+            Some(_) => self.parse_top_level(),
+            None => Err("Empty input".to_string()),
+        };
+        if self.lexer.chars.peek().is_some() {
+            println!("WARNING: part of the expression is not parsed, lexer state:\n{:?}\n", self.lexer);
+        }
+        result
     }
 }
 
@@ -245,7 +280,7 @@ fn operator_precedence(op: Operator) -> u8 {
     match op {
         LessThan => 10,
         Add | Sub => 20,
-        Mul => 40,
+        Mul | Div => 40,
     }
 }
 
@@ -331,11 +366,14 @@ mod tests {
         let got = parser.parse_definition().unwrap();
         let expected = Function::new(
             Box::new(Prototype::new(String::from("foo"), vec![])),
-            Box::new(Expr::Binary {
-                op: Operator::Add,
-                lhs: Box::new(Expr::Number(1.0)),
-                rhs: Box::new(Expr::Number(1.0)),
-            }),
+            Box::new(
+                Expr::Binary {
+                    op: Operator::Add,
+                    lhs: Box::new(Expr::Number(1.0)),
+                    rhs: Box::new(Expr::Number(1.0)),
+                },
+                false,
+            ),
         );
         assert_eq!(got, Box::new(expected));
     }

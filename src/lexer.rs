@@ -21,14 +21,15 @@ pub enum Operator {
     Add,
     Sub,
     Mul,
+    Div,
     LessThan,
 }
 
 #[derive(Debug)]
 pub struct Lexer<'a> {
-    input: &'a str,
-    chars: Peekable<Chars<'a>>,
-    pos: usize,
+    pub(crate) input: &'a str,
+    pub(crate) chars: Peekable<Chars<'a>>,
+    pub(crate) pos: usize,
 }
 
 impl<'a> Lexer<'a> {
@@ -73,6 +74,7 @@ impl<'a> Iterator for Lexer<'a> {
                 '+' => Some(Token::Operator(Add)),
                 '-' => Some(Token::Operator(Sub)),
                 '*' => Some(Token::Operator(Mul)),
+                '/' => Some(Token::Operator(Div)),
                 '<' => Some(Token::Operator(LessThan)),
 
                 // identifier | def | extern
