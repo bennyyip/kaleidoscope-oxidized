@@ -19,6 +19,12 @@ pub enum Expr {
         name: String,
         args: Vec<Box<Expr>>,
     },
+
+    If {
+        cond: Box<Expr>,
+        consequence: Box<Expr>,
+        alternative: Box<Expr>,
+    },
 }
 
 const ANONYMOUS_FUNCTION_NAME: &str = "__MAIN__";
@@ -124,6 +130,8 @@ impl<'a> Parser<'a> {
                 let arg = self.parse_expression()?;
                 args.push(arg);
                 if self.current == Some(Token::ClosingParenthesis) {
+                    // eat `)`
+                    self.get_next_token();
                     break;
                 }
             }
@@ -140,11 +148,13 @@ impl<'a> Parser<'a> {
     ///   ::= identifierexpr
     ///   ::= numberexpr
     ///   ::= parenexpr
+    ///   ::= ifexpr
     fn parse_primary(&mut self) -> Result<Box<Expr>, String> {
         match self.current {
             Some(Token::Ident(_)) => self.parse_identifier(),
             Some(Token::Number(_)) => self.parse_number(),
             Some(Token::OpeningParenthesis) => self.parse_paren(),
+            Some(Token::If) => self.parse_if(),
             _ => unexpected!("expression", self.current),
         }
     }
@@ -228,6 +238,33 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// ifexpr ::= 'if' expression 'then' expression 'else' expression
+    pub fn parse_if(&mut self) -> Result<Box<Expr>, String> {
+        // eat `if`
+        self.get_next_token();
+        let cond = self.parse_expression()?;
+        match self.current {
+            Some(Token::Then) => {
+                // eat `then`
+                self.get_next_token();
+                let consequence = self.parse_expression()?;
+                match self.current {
+                    Some(Token::Else) => {
+                        self.get_next_token();
+                        let alternative = self.parse_expression()?;
+                        Ok(Box::new(Expr::If {
+                            cond: cond,
+                            consequence: consequence,
+                            alternative: alternative,
+                        }))
+                    }
+                    _ => unexpected!("`else`", self.current),
+                }
+            }
+            _ => unexpected!("`then`", self.current),
+        }
+    }
+
     /// definition ::= 'def' prototype expression
     pub fn parse_definition(&mut self) -> Result<Box<Function>, String> {
         // eat `def`
@@ -270,7 +307,10 @@ impl<'a> Parser<'a> {
             None => Err("Empty input".to_string()),
         };
         if self.lexer.chars.peek().is_some() {
-            println!("WARNING: part of the expression is not parsed, lexer state:\n{:?}\n", self.lexer);
+            println!(
+                "WARNING: part of the expression is not parsed, lexer state:\n{:?}\n",
+                self.lexer
+            );
         }
         result
     }
@@ -278,7 +318,7 @@ impl<'a> Parser<'a> {
 
 fn operator_precedence(op: Operator) -> u8 {
     match op {
-        LessThan => 10,
+        LessThan | GreaterThan => 10,
         Add | Sub => 20,
         Mul | Div => 40,
     }

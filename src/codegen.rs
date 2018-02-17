@@ -17,6 +17,9 @@ pub struct Compiler<'a> {
     pub module: &'a Module,
     pub fpm: &'a PassManager,
     variables: HashMap<String, PointerValue>,
+
+    function: &'a Function,
+    fn_val_opt: Option<FunctionValue>,
 }
 
 impl<'a> Compiler<'a> {
@@ -57,7 +60,63 @@ impl<'a> Compiler<'a> {
                             "booltmp",
                         ))
                     }
+                    Operator::GreaterThan => {
+                        let cmp = self.builder.build_float_compare(
+                            FloatPredicate::UGT,
+                            &lhs,
+                            &rhs,
+                            "tmpcmp",
+                        );
+                        Ok(self.builder.build_unsigned_int_to_float(
+                            &cmp,
+                            &self.context.f64_type(),
+                            "booltmp",
+                        ))
+                    }
                 }
+            }
+
+            Expr::If {
+                ref cond,
+                ref consequence,
+                ref alternative,
+            } => {
+                let zero = self.context.f64_type().const_float(0.0);
+                let cond = self.compile_expr(cond)?;
+                let cond =
+                    self.builder
+                        .build_float_compare(FloatPredicate::ONE, &cond, &zero, "ifcond");
+
+                let parent = self.fn_val();
+                let then_bb = self.context.append_basic_block(&parent, "then");
+                let else_bb = self.context.append_basic_block(&parent, "else");
+                let cont_bb = self.context.append_basic_block(&parent, "ifcont");
+
+                self.builder
+                    .build_conditional_branch(&cond, &then_bb, &else_bb);
+
+                // emit `then` block
+                self.builder.position_at_end(&then_bb);
+                let then_val = self.compile_expr(consequence)?;
+                self.builder.build_unconditional_branch(&cont_bb);
+
+                // Codegen of 'Then' can change the current block, update ThenBB for the PHI.
+                let then_bb = self.builder.get_insert_block().unwrap();
+
+                // emit `else` block
+                self.builder.position_at_end(&else_bb);
+                let else_val = self.compile_expr(alternative)?;
+                self.builder.build_unconditional_branch(&cont_bb);
+
+                // Codegen of 'Else' can change the current block, update ThenBB for the PHI.
+                let else_bb = self.builder.get_insert_block().unwrap();
+
+                //emit merge block
+                self.builder.position_at_end(&cont_bb);
+                let phi = self.builder.build_phi(&self.context.f64_type(), "iftmp");
+                phi.add_incoming(&[(&then_val, &then_bb), (&else_val, &else_bb)]);
+
+                Ok(phi.as_basic_value().into_float_value())
             }
 
             Expr::Call { ref name, ref args } => match self.get_function(name) {
@@ -105,13 +164,14 @@ impl<'a> Compiler<'a> {
         Ok(fn_val)
     }
 
-    fn compile_function(&mut self, function: &Function) -> Result<FunctionValue, String> {
-        let proto = &function.proto;
+    fn compile_function(&mut self) -> Result<FunctionValue, String> {
+        let proto = &self.function.proto;
         let func = self.compile_prototype(proto)?;
         let entry = self.context.append_basic_block(&func, "entry");
         self.builder.position_at_end(&entry);
 
-        // self.variables.clear();
+        self.fn_val_opt = Some(func);
+
         self.variables.reserve(proto.args.len());
 
         for (i, arg) in func.params().enumerate() {
@@ -128,7 +188,7 @@ impl<'a> Compiler<'a> {
             self.variables.insert(proto.args[i].clone(), alloca);
         }
 
-        let body = self.compile_expr(&function.body)?;
+        let body = self.compile_expr(&self.function.body)?;
 
         self.builder.build_return(Some(&body));
 
@@ -147,6 +207,10 @@ impl<'a> Compiler<'a> {
         self.module.get_function(name)
     }
 
+    fn fn_val(&self) -> FunctionValue {
+        self.fn_val_opt.unwrap()
+    }
+
     pub fn compile(
         context: &'a Context,
         builder: &'a Builder,
@@ -160,7 +224,9 @@ impl<'a> Compiler<'a> {
             fpm: fpm,
             module: module,
             variables: HashMap::new(),
+            function: function,
+            fn_val_opt: None,
         };
-        compiler.compile_function(function)
+        compiler.compile_function()
     }
 }

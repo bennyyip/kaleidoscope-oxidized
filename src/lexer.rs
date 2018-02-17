@@ -7,10 +7,15 @@ use lexer::Operator::*;
 pub enum Token {
     Def,
     Extern,
+    If,
+    Then,
+    Else,
+
     Delimiter, //';' character
     OpeningParenthesis,
     ClosingParenthesis,
     Comma,
+
     Ident(String),
     Number(f64),
     Operator(Operator),
@@ -23,6 +28,7 @@ pub enum Operator {
     Mul,
     Div,
     LessThan,
+    GreaterThan,
 }
 
 #[derive(Debug)]
@@ -76,6 +82,7 @@ impl<'a> Iterator for Lexer<'a> {
                 '*' => Some(Token::Operator(Mul)),
                 '/' => Some(Token::Operator(Div)),
                 '<' => Some(Token::Operator(LessThan)),
+                '>' => Some(Token::Operator(GreaterThan)),
 
                 // identifier | def | extern
                 'a'...'z' | 'A'...'Z' | '_' => {
@@ -90,6 +97,9 @@ impl<'a> Iterator for Lexer<'a> {
                     match &src[start..self.pos] {
                         "def" => Some(Token::Def),
                         "extern" => Some(Token::Extern),
+                        "if" => Some(Token::If),
+                        "then" => Some(Token::Then),
+                        "else" => Some(Token::Else),
                         id => Some(Token::Ident(id.to_string())),
                     }
                 }
