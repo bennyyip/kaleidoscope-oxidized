@@ -25,6 +25,14 @@ pub enum Expr {
         consequence: Box<Expr>,
         alternative: Box<Expr>,
     },
+
+    For {
+        var_name: String,
+        start: Box<Expr>,
+        end: Box<Expr>,
+        step: Option<Box<Expr>>,
+        body: Box<Expr>,
+    },
 }
 
 const ANONYMOUS_FUNCTION_NAME: &str = "__MAIN__";
@@ -155,6 +163,7 @@ impl<'a> Parser<'a> {
             Some(Token::Number(_)) => self.parse_number(),
             Some(Token::OpeningParenthesis) => self.parse_paren(),
             Some(Token::If) => self.parse_if(),
+            Some(Token::For) => self.parse_for(),
             _ => unexpected!("expression", self.current),
         }
     }
@@ -263,6 +272,63 @@ impl<'a> Parser<'a> {
             }
             _ => unexpected!("`then`", self.current),
         }
+    }
+
+    /// forexpr ::= 'for' identifier '=' expr ',' expr (',' expr)? 'in' expression
+    pub fn parse_for(&mut self) -> Result<Box<Expr>, String> {
+        // eat `for`
+        self.get_next_token();
+
+        let id_name = match self.current {
+            Some(Token::Ident(ref ident)) => ident.to_string(),
+            _ => return unexpected!("identifier after for", self.current),
+        };
+        // eat `ident`
+        self.get_next_token();
+
+        match self.current {
+            Some(Token::Equal) => (),
+            _ => return unexpected!("`=` after for", self.current),
+        }
+        // eat `=`
+        self.get_next_token();
+
+        let start = self.parse_expression()?;
+
+        match self.current {
+            Some(Token::Comma) => (),
+            _ => return unexpected!("`,` after for", self.current),
+        }
+        // eat `,`
+        self.get_next_token();
+
+        let end = self.parse_expression()?;
+
+        let step = match self.current {
+            Some(Token::Comma) => {
+                // eat `,`
+                self.get_next_token();
+                Some(self.parse_expression()?)
+            }
+            _ => None,
+        };
+
+        match self.current {
+            Some(Token::In) => (),
+            _ => return unexpected!("`in` after for", self.current),
+        }
+        // eat `in`
+        self.get_next_token();
+
+        let body = self.parse_expression()?;
+
+        Ok(Box::new(Expr::For {
+            var_name: id_name,
+            start: start,
+            end: end,
+            step: step,
+            body: body,
+        }))
     }
 
     /// definition ::= 'def' prototype expression

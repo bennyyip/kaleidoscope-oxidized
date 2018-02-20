@@ -14,6 +14,21 @@ use kaleidoscope::lexer::{Lexer, Token};
 use kaleidoscope::codegen::Compiler;
 
 fn main() {
+    let mut display_lexer_output = false;
+    let mut display_parser_output = false;
+    let mut display_compiler_output = false;
+    let mut no_optimization = false;
+
+    for arg in ::std::env::args() {
+        match arg.as_str() {
+            "--dl" => display_lexer_output = true,
+            "--dp" => display_parser_output = true,
+            "--dc" => display_compiler_output = true,
+            "-0" => no_optimization = true,
+            _ => (),
+        }
+    }
+
     let context = Context::create();
     let module = context.create_module("repl");
     let builder = context.create_builder();
@@ -21,14 +36,16 @@ fn main() {
     // FPM
     let fpm = PassManager::create_for_function(&module);
 
-    fpm.add_instruction_combining_pass();
-    fpm.add_reassociate_pass();
-    fpm.add_gvn_pass();
-    fpm.add_cfg_simplification_pass();
-    fpm.add_basic_alias_analysis_pass();
-    fpm.add_promote_memory_to_register_pass();
-    fpm.add_instruction_combining_pass();
-    fpm.add_reassociate_pass();
+    if !no_optimization {
+        fpm.add_instruction_combining_pass();
+        fpm.add_reassociate_pass();
+        fpm.add_gvn_pass();
+        fpm.add_cfg_simplification_pass();
+        fpm.add_basic_alias_analysis_pass();
+        fpm.add_promote_memory_to_register_pass();
+        fpm.add_instruction_combining_pass();
+        fpm.add_reassociate_pass();
+    }
 
     fpm.initialize();
 
@@ -37,19 +54,6 @@ fn main() {
         .expect("Failed to initialize native target.");
 
     let mut prev_exprs: Vec<Box<Function>> = vec![];
-
-    let mut display_lexer_output = false;
-    let mut display_parser_output = false;
-    let mut display_compiler_output = false;
-
-    for arg in ::std::env::args() {
-        match arg.as_str() {
-            "--dl" => display_lexer_output = true,
-            "--dp" => display_parser_output = true,
-            "--dc" => display_compiler_output = true,
-            _ => (),
-        }
-    }
 
     loop {
         print!("?> ");

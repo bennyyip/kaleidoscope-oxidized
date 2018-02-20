@@ -7,14 +7,20 @@ use lexer::Operator::*;
 pub enum Token {
     Def,
     Extern,
+
     If,
     Then,
     Else,
 
+    For,
+    In,
+    Equal,
+
     Delimiter, //';' character
+    Comma,
+
     OpeningParenthesis,
     ClosingParenthesis,
-    Comma,
 
     Ident(String),
     Number(f64),
@@ -83,8 +89,9 @@ impl<'a> Iterator for Lexer<'a> {
                 '/' => Some(Token::Operator(Div)),
                 '<' => Some(Token::Operator(LessThan)),
                 '>' => Some(Token::Operator(GreaterThan)),
+                '=' => Some(Token::Equal),
 
-                // identifier | def | extern
+                // identifier | keyword
                 'a'...'z' | 'A'...'Z' | '_' => {
                     loop {
                         match self.chars.peek() {
@@ -100,6 +107,8 @@ impl<'a> Iterator for Lexer<'a> {
                         "if" => Some(Token::If),
                         "then" => Some(Token::Then),
                         "else" => Some(Token::Else),
+                        "for" => Some(Token::For),
+                        "in" => Some(Token::In),
                         id => Some(Token::Ident(id.to_string())),
                     }
                 }
