@@ -9,9 +9,18 @@ use inkwell::passes::PassManager;
 use inkwell::targets::{InitializationConfig, Target};
 use inkwell::OptimizationLevel;
 
+use inkwell::module::Linkage;
+use inkwell::types::BasicType;
+
 use kaleidoscope::parser::*;
 use kaleidoscope::lexer::{Lexer, Token};
 use kaleidoscope::codegen::Compiler;
+
+#[allow(dead_code)]
+#[link(name = "ksio")]
+extern "C" {
+    fn putchard(x: f64) -> f64;
+}
 
 fn main() {
     let mut display_lexer_output = false;
@@ -53,13 +62,16 @@ fn main() {
     Target::initialize_native(&InitializationConfig::default())
         .expect("Failed to initialize native target.");
 
-    let mut prev_exprs: Vec<Box<Function>> = vec![];
+    let mut prev_defs: Vec<Box<Function>> = vec![];
+    let mut prev_externs: Vec<Box<Prototype>> = vec![];
 
+    // Repl
     loop {
         print!("?> ");
-        std::io::stdout()
-            .flush()
-            .expect("Could not flush to standard output.");
+        let stdout = io::stdout();
+        let mut handle = stdout.lock();
+        handle.flush().expect("Could not flush to standard output.");
+
         let mut input = String::new();
         io::stdin()
             .read_line(&mut input)
@@ -80,56 +92,111 @@ fn main() {
 
         let module = context.create_module("tmp");
 
-        let (name, is_anonymous) = match Parser::from_source(input.as_str()).parse() {
-            Ok(function) => {
-                if display_parser_output {
-                    println!("-> paser output:\n{:?}\n", function);
-                }
+        // compile externs
+        for proto in &prev_externs {
+            // TODO: move to codegen
+            let f64_type: &BasicType = &context.f64_type();
+            let param_types = ::std::iter::repeat(f64_type)
+                .take(proto.args.len())
+                .collect::<Vec<&BasicType>>();
+            let fn_type = context.f64_type().fn_type(&param_types, false);
+            let fn_val =
+                module.add_function(&proto.name, &fn_type, Some(&Linkage::ExternalLinkage));
 
-                for expr in &prev_exprs {
-                    Compiler::compile(&context, &builder, &fpm, &module, expr)
-                        .expect("Cannot re-add previously compiled function.");
-                }
-
-                match Compiler::compile(&context, &builder, &fpm, &module, &function) {
-                    Ok(func) => {
-                        if display_compiler_output {
-                            println!("-> IR:");
-                            func.print_to_stderr();
-                        }
-                        let is_anonymous = function.is_anonymous();
-                        if !is_anonymous {
-                            prev_exprs.push(function);
-                        }
-                        (func.get_name().to_str().unwrap().to_string(), is_anonymous)
-                    }
-                    Err(err) => {
-                        println!("!> Error when emiting LLVM IR: {:?}", err);
-                        continue;
-                    }
-                }
+            for (i, arg) in fn_val.params().enumerate() {
+                arg.into_float_value().set_name(&proto.args[i]);
             }
-            Err(err) => {
-                println!("!> Error during parsing: {:?}", err);
-                continue;
-            }
-        };
+        }
 
-        // JIT
-        if is_anonymous {
-            let engine = module
-                .create_jit_execution_engine(OptimizationLevel::None)
-                .unwrap();
+        // compile functions
+        for expr in &prev_defs {
+            Compiler::compile(&context, &builder, &fpm, &module, expr)
+                .expect("Cannot re-add previously compiled function.");
+        }
 
-            let addr = match engine.get_function_address(&name) {
-                Ok(addr) => addr,
+
+        let mut parser = Parser::from_source(input.as_str());
+
+        match parser.current() {
+            Some(Token::Def) => match parser.parse_definition() {
+                Ok(function) => {
+                    if display_parser_output {
+                        println!("-> paser output:\n{:?}\n", function);
+                    }
+
+                    match Compiler::compile(&context, &builder, &fpm, &module, &function) {
+                        Ok(func) => {
+                            if display_compiler_output {
+                                println!("-> IR:");
+                                func.print_to_stderr();
+                            }
+                            // add to prev_defs
+                            prev_defs.push(function);
+                        }
+                        Err(err) => {
+                            println!(
+                                "!> Error when emiting LLVM IR for function definition: {:?}",
+                                err
+                            );
+                            continue;
+                        }
+                    }
+                }
                 Err(err) => {
-                    println!("!> Error during execution: {:?}", err);
+                    println!("!> Error during parsing function definition: {:?}", err);
                     continue;
                 }
-            };
-            let compiled_fn: extern "C" fn() -> f64 = unsafe { std::mem::transmute(addr) };
-            println!("=> {}", compiled_fn());
+            },
+
+            Some(Token::Extern) => match parser.parse_extern() {
+                Ok(proto) => {
+                    prev_externs.push(proto);
+                }
+                Err(err) => {
+                    println!("!> Error when emiting LLVM IR for extern def: {:?}", err);
+                    continue;
+                }
+            },
+
+            _ => match parser.parse_top_level() {
+                Ok(function) => {
+                    if display_parser_output {
+                        println!("-> paser output:\n{:?}\n", function);
+                    }
+
+                    match Compiler::compile(&context, &builder, &fpm, &module, &function) {
+                        Ok(func) => {
+                            if display_compiler_output {
+                                println!("-> IR:");
+                                func.print_to_stderr();
+                            }
+                        }
+                        Err(err) => {
+                            println!("!> Error when emiting LLVM IR for top level: {:?}", err);
+                            continue;
+                        }
+                    }
+
+                    // execute code
+                    let engine = module
+                        .create_jit_execution_engine(OptimizationLevel::None)
+                        .unwrap();
+
+                    let addr = match engine.get_function_address(ANONYMOUS_FUNCTION_NAME) {
+                        Ok(addr) => addr,
+                        Err(err) => {
+                            println!("!> Error during execution: {:?}", err);
+                            continue;
+                        }
+                    };
+                    let compiled_fn: extern "C" fn() -> f64 = unsafe { std::mem::transmute(addr) };
+                    println!("=> {}", compiled_fn());
+                }
+                Err(err) => {
+                    println!("!> Error during parsing top level: {:?}", err);
+                    continue;
+                }
+            },
         }
     }
 }

@@ -26,6 +26,7 @@ pub enum Expr {
         alternative: Box<Expr>,
     },
 
+    // Actually is a `do {} while(cond)` loop
     For {
         var_name: String,
         start: Box<Expr>,
@@ -35,33 +36,25 @@ pub enum Expr {
     },
 }
 
-const ANONYMOUS_FUNCTION_NAME: &str = "__MAIN__";
+pub const ANONYMOUS_FUNCTION_NAME: &str = "__MAIN__";
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Prototype {
-    pub(crate) name: String,
-    pub(crate) args: Vec<String>,
+    pub name: String,
+    pub args: Vec<String>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Function {
     pub(crate) proto: Box<Prototype>,
     pub(crate) body: Box<Expr>,
-    pub(crate) is_anonymous: bool,
 }
 
 impl Function {
-    pub fn is_anonymous(&self) -> bool {
-        self.is_anonymous
-    }
-}
-
-impl Function {
-    pub fn new(proto: Box<Prototype>, body: Box<Expr>, is_anonymous: bool) -> Self {
+    pub fn new(proto: Box<Prototype>, body: Box<Expr>) -> Self {
         Function {
             proto: proto,
             body: body,
-            is_anonymous: is_anonymous,
         }
     }
 }
@@ -135,13 +128,13 @@ impl<'a> Parser<'a> {
             let mut args = Vec::new();
             self.get_next_token();
             loop {
-                let arg = self.parse_expression()?;
-                args.push(arg);
                 if self.current == Some(Token::ClosingParenthesis) {
                     // eat `)`
                     self.get_next_token();
                     break;
                 }
+                let arg = self.parse_expression()?;
+                args.push(arg);
             }
             Ok(Box::new(Expr::Call {
                 name: id,
@@ -338,7 +331,7 @@ impl<'a> Parser<'a> {
 
         let proto = self.parse_prototype()?;
         let body = self.parse_expression()?;
-        Ok(Box::new(Function::new(proto, body, false)))
+        Ok(Box::new(Function::new(proto, body)))
     }
 
     /// external ::= 'extern' prototype
@@ -355,30 +348,11 @@ impl<'a> Parser<'a> {
             Vec::new(),
         ));
         let body = self.parse_expression()?;
-        Ok(Box::new(Function::new(proto, body, true)))
+        Ok(Box::new(Function::new(proto, body)))
     }
 
-    pub fn parse(&mut self) -> Result<Box<Function>, String> {
-        let result = match self.current {
-            Some(Token::Def) => self.parse_definition(),
-            Some(Token::Extern) => {
-                let proto = self.parse_extern()?;
-                Ok(Box::new(Function::new(
-                    proto,
-                    Box::new(Expr::Number(::std::f64::NAN)),
-                    false,
-                )))
-            }
-            Some(_) => self.parse_top_level(),
-            None => Err("Empty input".to_string()),
-        };
-        if self.lexer.chars.peek().is_some() {
-            println!(
-                "WARNING: part of the expression is not parsed, lexer state:\n{:?}\n",
-                self.lexer
-            );
-        }
-        result
+    pub fn current(&self) -> Option<Token> {
+        self.current.clone()
     }
 }
 
