@@ -1,5 +1,4 @@
 use lexer::*;
-use lexer::Operator::*;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -18,8 +17,14 @@ lazy_static! {
 pub enum Expr {
     Number(f64),
     Variable(String),
+
+    Unary {
+        op: char,
+        operand: Box<Expr>,
+    },
+
     Binary {
-        op: Operator,
+        op: char,
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
@@ -165,6 +170,9 @@ impl<'a> Parser<'a> {
                     self.get_next_token();
                     break;
                 }
+                if self.current == Some(Token::Comma) {
+                    self.get_next_token();
+                }
                 let arg = self.parse_expression()?;
                 args.push(arg);
             }
@@ -193,12 +201,30 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// unary
+    ///   ::= primary
+    ///   ::= '!' unary
+    fn parse_unary(&mut self) -> Result<Box<Expr>, String> {
+        if let Some(Token::Other(op)) = self.current {
+            // If this is a unary operator, read it.
+            self.get_next_token();
+            let operand = self.parse_unary()?;
+            Ok(Box::new(Expr::Unary {
+                op: op,
+                operand: operand,
+            }))
+        } else {
+            // If the current token is not an operator, it must be a primary expr.
+            self.parse_primary()
+        }
+    }
+
     /// binoprhs
-    ///   ::= (op primary)*
+    ///   ::= (op unary)*
     fn parse_bin_op_rhs(&mut self, prec: u8, mut lhs: Box<Expr>) -> Result<Box<Expr>, String> {
         loop {
             let op = match self.current {
-                Some(Token::Operator(op)) => op,
+                Some(Token::Other(op)) => op,
                 _ => return Ok(lhs),
             };
 
@@ -212,7 +238,7 @@ impl<'a> Parser<'a> {
             // eat op
             self.get_next_token();
 
-            let mut rhs = self.parse_primary()?;
+            let mut rhs = self.parse_unary()?;
 
             // If BinOp binds less tightly with RHS than the operator after RHS, let
             // the pending operator take RHS as its LHS.
@@ -220,7 +246,7 @@ impl<'a> Parser<'a> {
             // `(a + (b * c)) +d`
             // Not:
             // `a + ((b * c) + d)`
-            if let Some(Token::Operator(op)) = self.current {
+            if let Some(Token::Other(op)) = self.current {
                 match self.operator_precedence(op) {
                     next_prec if tok_prec < next_prec => {
                         rhs = self.parse_bin_op_rhs(tok_prec + 1, rhs)?
@@ -241,13 +267,14 @@ impl<'a> Parser<'a> {
     ///   ::= primary binoprhs
     ///
     fn parse_expression(&mut self) -> Result<Box<Expr>, String> {
-        let lhs = self.parse_primary()?;
+        let lhs = self.parse_unary()?;
         self.parse_bin_op_rhs(0, lhs)
     }
 
     /// prototype
     ///   ::= id '(' id* ')'
     ///   ::= binary LETTER number? (id, id)
+    ///   ::= unary LETTER (id)
     fn parse_prototype(&mut self) -> Result<Box<Prototype>, String> {
         // kind:
         // 0 = identifier, 1 = unary, 2 = binary.
@@ -262,7 +289,7 @@ impl<'a> Parser<'a> {
                 self.get_next_token();
 
                 let op = match self.current {
-                    Some(Token::Operator(User(op))) => op,
+                    Some(Token::Other(op)) => op,
                     _ => return unexpected!("operator name in prototype", self.current),
                 };
                 let fn_name = format!("binary{}", op);
@@ -277,16 +304,31 @@ impl<'a> Parser<'a> {
                                 self.current
                             );
                         } else {
+                            self.get_next_token();
                             n
                         }
                     }
                     _ => 30,
                 };
 
-                PRECEDENCE_TABLE.lock().unwrap().insert(op, binary_precedence);
+                PRECEDENCE_TABLE
+                    .lock()
+                    .unwrap()
+                    .insert(op, binary_precedence);
 
                 (fn_name, 2, binary_precedence)
             }
+
+            Some(Token::Unary) => {
+                self.get_next_token();
+                let fn_name = match self.current {
+                    Some(Token::Other(op)) => format!("unary{}", op),
+                    _ => return unexpected!("operator name in prototype", self.current),
+                };
+                self.get_next_token();
+                (fn_name, 1, 30)
+            }
+
             _ => return unexpected!("function name in prototype", self.current),
         };
 
@@ -366,7 +408,7 @@ impl<'a> Parser<'a> {
         self.get_next_token();
 
         match self.current {
-            Some(Token::Equal) => (),
+            Some(Token::Other('=')) => (),
             _ => return unexpected!("`=` after for", self.current),
         }
         // eat `=`
@@ -443,12 +485,12 @@ impl<'a> Parser<'a> {
         self.current.clone()
     }
 
-    fn operator_precedence(&self, op: Operator) -> u8 {
+    fn operator_precedence(&self, op: char) -> u8 {
         match op {
-            LessThan | GreaterThan => 10,
-            Add | Sub => 20,
-            Mul | Div => 40,
-            User(ch) => *PRECEDENCE_TABLE
+            '<' => 10,
+            '+' | '-' => 20,
+            '*' | '/' => 40,
+            ch => *PRECEDENCE_TABLE
                 .lock()
                 .unwrap()
                 .get(&ch)
@@ -487,7 +529,7 @@ mod tests {
         assert_eq!(
             ast,
             Box::new(Expr::Binary {
-                op: Operator::Add,
+                op: '+',
                 lhs: Box::new(Expr::Number(1.0)),
                 rhs: Box::new(Expr::Number(1.0)),
             })
@@ -499,12 +541,12 @@ mod tests {
         let mut parser = Parser::from_source("1 + 2 * 3 - 2");
         let got = parser.parse_expression().unwrap();
         let expected = Box::new(Expr::Binary {
-            op: Operator::Sub,
+            op: '-',
             lhs: Box::new(Expr::Binary {
-                op: Operator::Add,
+                op: '+',
                 lhs: Box::new(Expr::Number(1.0)),
                 rhs: Box::new(Expr::Binary {
-                    op: Operator::Mul,
+                    op: '*',
                     lhs: Box::new(Expr::Number(2.0)),
                     rhs: Box::new(Expr::Number(3.0)),
                 }),
@@ -543,7 +585,7 @@ mod tests {
             Box::new(Prototype::new(String::from("foo"), vec![]), false, 0),
             Box::new(
                 Expr::Binary {
-                    op: Operator::Add,
+                    op: '+',
                     lhs: Box::new(Expr::Number(1.0)),
                     rhs: Box::new(Expr::Number(1.0)),
                 },

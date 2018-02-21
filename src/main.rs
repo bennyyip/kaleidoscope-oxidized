@@ -27,15 +27,15 @@ use structopt::StructOpt;
 #[derive(StructOpt, Debug)]
 #[structopt(about = "kaleidoscope REPL")]
 struct Opt {
-    #[structopt(long = "dl")]
+    #[structopt(long = "dl" ,help = "Prints lexer output")]
     display_lexer_output: bool,
-    #[structopt(long = "dp")]
+    #[structopt(long = "dp" ,help = "Prints parser output")]
     display_parser_output: bool,
-    #[structopt(long = "dc")]
+    #[structopt(long = "dc" ,help = "Prints LLVM IR")]
     display_compiler_output: bool,
-    #[structopt(short = "0")]
+    #[structopt(short = "0", help = "Diable LLVM function pass managers")]
     no_optimization: bool,
-    #[structopt(short = "i", long = "input", parse(from_os_str))]
+    #[structopt(short = "i", long = "input", parse(from_os_str), help = "input file")]
     input: Option<PathBuf>,
 }
 
@@ -78,15 +78,23 @@ fn main() {
                     match parser.current() {
                         Some(Token::Def) => match handle_definition(&opt, &mut parser) {
                             Ok(function) => prev_defs.push(function),
-                            Err(err) => println!("{}", err),
+                            Err(err) => {
+                                println!("{}", err);
+                                std::process::exit(1);
+                            }
                         },
 
                         Some(Token::Extern) => match parser.parse_extern() {
                             Ok(proto) => prev_externs.push(proto),
                             Err(err) => {
-                                println!("!> Error when emiting LLVM IR for extern def: {:?}", err)
+                                println!("!> Error when emiting LLVM IR for extern def: {:?}", err);
+                                std::process::exit(1);
                             }
                         },
+
+                        Some(Token::Delimiter) => {
+                            parser.get_next_token();
+                        }
 
                         None => {
                             break;
@@ -101,7 +109,10 @@ fn main() {
                             &module,
                         ) {
                             Ok(_) => (),
-                            Err(err) => println!("{}", err),
+                            Err(err) => {
+                                println!("{}", err);
+                                std::process::exit(1);
+                            }
                         },
                     }
                 }

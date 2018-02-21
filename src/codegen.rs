@@ -9,7 +9,6 @@ use inkwell::FloatPredicate;
 use std::collections::HashMap;
 
 use parser::{Expr, Function, Prototype};
-use lexer::Operator;
 
 pub struct Compiler<'a> {
     pub context: &'a Context,
@@ -34,6 +33,21 @@ impl<'a> Compiler<'a> {
                 None => Err("Could not find a matching variable.".to_owned()),
             },
 
+            Expr::Unary { op, ref operand } => {
+                let operand = self.compile_expr(operand)?;
+                let func = match self.get_function(&format!("unary{}", op)) {
+                    Some(func) => func,
+                    None => return Err(format!("cannot find unary opeartor {}", op)),
+                };
+                match self.builder
+                    .build_call(&func, &[&operand], "unaryop", false)
+                    .left()
+                {
+                    Some(value) => Ok(value.into_float_value()),
+                    None => Err("Invalid call produced".to_string()),
+                }
+            }
+
             Expr::Binary {
                 op,
                 ref lhs,
@@ -43,11 +57,11 @@ impl<'a> Compiler<'a> {
                 let rhs = self.compile_expr(rhs)?;
 
                 match op {
-                    Operator::Add => Ok(self.builder.build_float_add(&lhs, &rhs, "tmpadd")),
-                    Operator::Sub => Ok(self.builder.build_float_sub(&lhs, &rhs, "tmpsub")),
-                    Operator::Mul => Ok(self.builder.build_float_mul(&lhs, &rhs, "tmpmul")),
-                    Operator::Div => Ok(self.builder.build_float_div(&lhs, &rhs, "tmpdiv")),
-                    Operator::LessThan => {
+                    '+' => Ok(self.builder.build_float_add(&lhs, &rhs, "tmpadd")),
+                    '-' => Ok(self.builder.build_float_sub(&lhs, &rhs, "tmpsub")),
+                    '*' => Ok(self.builder.build_float_mul(&lhs, &rhs, "tmpmul")),
+                    '/' => Ok(self.builder.build_float_div(&lhs, &rhs, "tmpdiv")),
+                    '<' => {
                         let cmp = self.builder.build_float_compare(
                             FloatPredicate::ULT,
                             &lhs,
@@ -60,23 +74,10 @@ impl<'a> Compiler<'a> {
                             "booltmp",
                         ))
                     }
-                    Operator::GreaterThan => {
-                        let cmp = self.builder.build_float_compare(
-                            FloatPredicate::UGT,
-                            &lhs,
-                            &rhs,
-                            "tmpcmp",
-                        );
-                        Ok(self.builder.build_unsigned_int_to_float(
-                            &cmp,
-                            &self.context.f64_type(),
-                            "booltmp",
-                        ))
-                    }
-                    Operator::User(ch) => {
-                        let func = match self.get_function(&format!("binary{}", ch)) {
+                    op => {
+                        let func = match self.get_function(&format!("binary{}", op)) {
                             Some(func) => func,
-                            None => return Err(format!("cannot find opeartor {}", ch)),
+                            None => return Err(format!("cannot find binary opeartor {}", op)),
                         };
                         match self.builder
                             .build_call(&func, &[&lhs, &rhs], "binop", false)

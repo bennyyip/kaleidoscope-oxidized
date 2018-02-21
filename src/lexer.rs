@@ -1,7 +1,6 @@
 use std::iter::{Iterator, Peekable};
 use std::str::Chars;
 
-use lexer::Operator::*;
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum Token {
@@ -14,7 +13,6 @@ pub enum Token {
 
     For,
     In,
-    Equal,
 
     Delimiter, //';' character
     Comma,
@@ -27,18 +25,7 @@ pub enum Token {
 
     Ident(String),
     Number(f64),
-    Operator(Operator),
-}
-
-#[derive(PartialEq, Clone, Copy, Debug)]
-pub enum Operator {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    LessThan,
-    GreaterThan,
-    User(char),
+    Other(char),
 }
 
 #[derive(Debug)]
@@ -87,13 +74,6 @@ impl<'a> Iterator for Lexer<'a> {
                 ';' => Some(Token::Delimiter),
                 '(' => Some(Token::OpeningParenthesis),
                 ')' => Some(Token::ClosingParenthesis),
-                '+' => Some(Token::Operator(Add)),
-                '-' => Some(Token::Operator(Sub)),
-                '*' => Some(Token::Operator(Mul)),
-                '/' => Some(Token::Operator(Div)),
-                '<' => Some(Token::Operator(LessThan)),
-                '>' => Some(Token::Operator(GreaterThan)),
-                '=' => Some(Token::Equal),
 
                 // identifier | keyword
                 'a'...'z' | 'A'...'Z' | '_' => {
@@ -145,7 +125,7 @@ impl<'a> Iterator for Lexer<'a> {
                     }
                     self.next()
                 }
-                ch if ch.is_ascii() => Some(Token::Operator(User(ch))),
+                ch if ch.is_ascii() => Some(Token::Other(ch)),
 
                 _ => None,
             }
