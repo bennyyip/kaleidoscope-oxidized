@@ -22,6 +22,9 @@ pub enum Token {
     OpeningParenthesis,
     ClosingParenthesis,
 
+    Unary,
+    Binary,
+
     Ident(String),
     Number(f64),
     Operator(Operator),
@@ -109,6 +112,8 @@ impl<'a> Iterator for Lexer<'a> {
                         "else" => Some(Token::Else),
                         "for" => Some(Token::For),
                         "in" => Some(Token::In),
+                        "unary" => Some(Token::Unary),
+                        "binary" => Some(Token::Binary),
                         id => Some(Token::Ident(id.to_string())),
                     }
                 }
