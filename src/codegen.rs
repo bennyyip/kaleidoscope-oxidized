@@ -4,7 +4,7 @@ use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::passes::PassManager;
 use inkwell::types::BasicType;
-use inkwell::values::{BasicValue, FloatValue, FunctionValue,  PointerValue};
+use inkwell::values::{BasicValue, FloatValue, FunctionValue, PointerValue};
 use inkwell::FloatPredicate;
 use std::collections::HashMap;
 
@@ -72,6 +72,19 @@ impl<'a> Compiler<'a> {
                             &self.context.f64_type(),
                             "booltmp",
                         ))
+                    }
+                    Operator::User(ch) => {
+                        let func = match self.get_function(&format!("binary{}", ch)) {
+                            Some(func) => func,
+                            None => return Err(format!("cannot find opeartor {}", ch)),
+                        };
+                        match self.builder
+                            .build_call(&func, &[&lhs, &rhs], "binop", false)
+                            .left()
+                        {
+                            Some(value) => Ok(value.into_float_value()),
+                            None => Err("Invalid call produced".to_string()),
+                        }
                     }
                 }
             }

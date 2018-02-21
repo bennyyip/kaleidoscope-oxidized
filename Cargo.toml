@@ -8,3 +8,4 @@ build = "build.rs"
 inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master" }
 llvm-sys = "37.0.5"
 structopt = "0.2"
+lazy_static = "1.0"

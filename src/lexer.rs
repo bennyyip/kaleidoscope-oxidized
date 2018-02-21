@@ -38,6 +38,7 @@ pub enum Operator {
     Div,
     LessThan,
     GreaterThan,
+    User(char),
 }
 
 #[derive(Debug)]
@@ -144,6 +145,8 @@ impl<'a> Iterator for Lexer<'a> {
                     }
                     self.next()
                 }
+                ch if ch.is_ascii() => Some(Token::Operator(User(ch))),
+
                 _ => None,
             }
         } else {
