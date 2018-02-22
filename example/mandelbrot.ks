@@ -32,10 +32,6 @@ def binary& 6 (LHS RHS)
   else
     !!RHS;
 
-# Define = with slightly lower precedence than relationals.
-def binary = 9 (LHS RHS)
-  !(LHS < RHS | LHS > RHS);
-
 # Define ':' for sequencing: as a low-precedence operator that ignores operands
 # and just returns the RHS.
 def binary : 1 (x y) y;

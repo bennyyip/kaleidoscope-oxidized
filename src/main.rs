@@ -27,11 +27,11 @@ use structopt::StructOpt;
 #[derive(StructOpt, Debug)]
 #[structopt(about = "kaleidoscope REPL")]
 struct Opt {
-    #[structopt(long = "dl" ,help = "Prints lexer output")]
+    #[structopt(long = "dl", help = "Prints lexer output")]
     display_lexer_output: bool,
-    #[structopt(long = "dp" ,help = "Prints parser output")]
+    #[structopt(long = "dp", help = "Prints parser output")]
     display_parser_output: bool,
-    #[structopt(long = "dc" ,help = "Prints LLVM IR")]
+    #[structopt(long = "dc", help = "Prints LLVM IR")]
     display_compiler_output: bool,
     #[structopt(short = "0", help = "Diable LLVM function pass managers")]
     no_optimization: bool,
@@ -196,12 +196,10 @@ fn main() {
                                 println!("-> IR:");
                                 func.print_to_stderr();
                             }
-                            Err(err) => {
-                                (println!(
-                                    "!> Error when emiting LLVM IR for function definition: {:?}",
-                                    err
-                                ))
-                            }
+                            Err(err) => println!(
+                                "!> Error when emiting LLVM IR for function definition: {:?}",
+                                err
+                            ),
                         }
                     }
 
@@ -227,6 +225,7 @@ fn main() {
 #[link(name = "ksio")]
 extern "C" {
     fn putchard(x: f64) -> f64;
+    fn printf(x: f64) -> f64;
 }
 
 fn handle_top_level(

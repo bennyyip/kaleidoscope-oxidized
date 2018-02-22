@@ -26,9 +26,9 @@ FLAGS:
 OPTIONS:
     -i, --input <input>    input file
 23:55:33 benyip @ alcohol ω ~/.ghq/github.com/bennyyip/kaleidoscope (master)
-λ cargo run --  --dc -i example/basic.ks
+λ cargo run --  --dc -i example/mandelbrot.ks
     Finished dev [unoptimized + debuginfo] target(s) in 0.0 secs
-     Running `target/debug/kaleidoscope --dc -i example/basic.ks`
+     Running `target/debug/kaleidoscope --dc -i example/mandelbrot.ks`
 ?> mandel(-2.3, -1.3, 0.05, 0.07);
 -> IR:
 

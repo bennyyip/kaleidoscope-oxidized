@@ -1,7 +1,6 @@
 use std::iter::{Iterator, Peekable};
 use std::str::Chars;
 
-
 #[derive(PartialEq, Clone, Debug)]
 pub enum Token {
     Def,
@@ -12,6 +11,7 @@ pub enum Token {
     Else,
 
     For,
+    Var,
     In,
 
     Delimiter, //';' character
@@ -92,6 +92,7 @@ impl<'a> Iterator for Lexer<'a> {
                         "then" => Some(Token::Then),
                         "else" => Some(Token::Else),
                         "for" => Some(Token::For),
+                        "var" => Some(Token::Var),
                         "in" => Some(Token::In),
                         "unary" => Some(Token::Unary),
                         "binary" => Some(Token::Binary),

@@ -53,6 +53,27 @@ impl<'a> Compiler<'a> {
                 ref lhs,
                 ref rhs,
             } => {
+                // Special case '=' because we don't want to emit the LHS as an expression.
+                if op == '=' {
+                    match lhs.as_ref() {
+                        &Expr::Variable(ref var_name) => {
+                            let val = self.compile_expr(rhs)?;
+                            let variable = self.variables.get(var_name);
+                            if variable.is_none() {
+                                return Err(format!("unknown variable name: {}", var_name));
+                            }
+                            self.builder.build_store(&variable.unwrap(), &val);
+                            return Ok(val);
+                        }
+                        other => {
+                            return Err(format!(
+                                "destination of `=` must be a variable, got {:?}",
+                                other
+                            ))
+                        }
+                    }
+                }
+
                 let lhs = self.compile_expr(lhs)?;
                 let rhs = self.compile_expr(rhs)?;
 
@@ -140,14 +161,17 @@ impl<'a> Compiler<'a> {
                 ref step,
                 ref body,
             } => {
+                let parent = self.fn_val();
+                // Create an alloca for the variable in the entry block.
+                let alloca = self.create_entry_block_alloca(var_name, None);
                 // Emit the start code first, without 'variable' in scope.
                 let start_val = self.compile_expr(start)?;
 
-                // Make the new basic block for the loop header, inserting after current
-                // // block.
-                let parent = self.fn_val();
-                let prehead_bb = self.builder.get_insert_block().unwrap();
+                // Store the value into the alloca.
+                self.builder.build_store(&alloca, &start_val);
 
+                // Make the new basic block for the loop header, inserting after current
+                // block.
                 let loop_bb = self.context.append_basic_block(&parent, "loop");
 
                 // Insert an explicit fall through from the current block to the LoopBB.
@@ -156,47 +180,43 @@ impl<'a> Compiler<'a> {
                 // Start insertion in LoopBB.
                 self.builder.position_at_end(&loop_bb);
 
-                // Start the PHI node with an entry for Start.
-                let variable = self.builder.build_phi(&self.context.f64_type(), var_name);
-                let var_alloca = self.create_entry_block_alloca(var_name, None);
-                self.builder
-                    .build_store(&var_alloca, &variable.as_basic_value());
-
-                variable.add_incoming(&[(&start_val, &prehead_bb)]);
-
                 // Within the loop, the variable is defined equal to the PHI node.  If it
                 // shadows an existing variable, we have to restore it, so save it now.
                 let old_val = self.variables.remove(var_name);
-                self.variables.insert(var_name.to_string(), var_alloca);
+                self.variables.insert(var_name.to_string(), alloca);
 
                 // Emit the body of the loop.  This, like any other expr, can change the
                 // current BB.  Note that we ignore the value computed by the body, but don't
                 // allow an error.
                 self.compile_expr(body)?;
 
-                // Emit the step value.
                 let step_val = match *step {
                     Some(ref step) => self.compile_expr(step)?,
                     // If not specified, use 1.0.
                     None => self.context.f64_type().const_float(1.0),
                 };
 
+                // Compute the end condition.
+                let end_cond = &self.compile_expr(end)?;
+
+                // Reload, increment, and restore the alloca.  This handles the case where
+                // the body of the loop mutates the variable.
+                let curr_var = self.builder.build_load(&alloca, &var_name);
                 let next_var = self.builder.build_float_add(
-                    &variable.as_basic_value().into_float_value(),
+                    &curr_var.into_float_value(),
                     &step_val,
                     "nextvar",
                 );
+                self.builder.build_store(&alloca, &next_var);
 
-                // Compute the end condition.
+                // Convert condition to a bool by comparing non-equal to 0.0.
                 let end_cond = self.builder.build_float_compare(
                     FloatPredicate::ONE,
-                    &self.compile_expr(end)?,
+                    &end_cond,
                     &self.context.f64_type().const_float(0.0),
                     "loopcond",
                 );
-
                 // Create the "after loop" block and insert it.
-                let loop_end_bb = self.builder.get_insert_block().unwrap();
                 let after_bb = self.context.append_basic_block(&parent, "afterloop");
 
                 // Insert the conditional branch into the end of LoopEndBB.
@@ -206,9 +226,6 @@ impl<'a> Compiler<'a> {
                 // Any new code will be inserted in AfterBB.
                 self.builder.position_at_end(&after_bb);
 
-                // Add a new entry to the PHI node for the backedge.
-                variable.add_incoming(&[(&next_var, &loop_end_bb)]);
-
                 // Restore the unshadowed variable.
                 self.variables.remove(var_name);
                 if let Some(x) = old_val {
@@ -217,6 +234,31 @@ impl<'a> Compiler<'a> {
 
                 // for expr always returns 0.0.
                 Ok(self.context.f64_type().const_float(0.0))
+            }
+
+            Expr::Var {
+                ref var_names,
+                ref body,
+            } => {
+                let mut old_bindings = vec![];
+                for &(ref name, ref val) in var_names {
+                    let val = self.compile_expr(val)?;
+                    let alloca = self.create_entry_block_alloca(name, None);
+                    self.builder.build_store(&alloca, &val);
+
+                    old_bindings.push(self.variables.remove(name));
+                    self.variables.insert(name.to_owned(), alloca);
+                }
+
+                let body = self.compile_expr(body)?;
+
+                for (i, &(ref name, ref _val)) in var_names.iter().enumerate() {
+                    if let Some(alloca) = old_bindings[i] {
+                        *self.variables.get_mut(name).unwrap() = alloca;
+                    }
+                }
+
+                Ok(body)
             }
 
             Expr::Call { ref name, ref args } => match self.get_function(name) {

@@ -1,10 +1,9 @@
 #![feature(nll)]
 
 extern crate inkwell;
-extern crate llvm_sys;
 #[macro_use]
 extern crate lazy_static;
-
+extern crate llvm_sys;
 
 pub mod lexer;
 pub mod parser;

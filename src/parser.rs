@@ -9,7 +9,14 @@ macro_rules! unexpected {
 
 lazy_static! {
     static ref PRECEDENCE_TABLE: Mutex<HashMap<char, u8>> = {
-        Mutex::new(HashMap::new())
+        let mut m = HashMap::new();
+        m.insert('=', 2);
+        m.insert('<', 10);
+        m.insert('+', 20);
+        m.insert('-', 20);
+        m.insert('*', 40);
+        m.insert('/', 40);
+        Mutex::new(m)
     };
 }
 
@@ -46,6 +53,11 @@ pub enum Expr {
         start: Box<Expr>,
         end: Box<Expr>,
         step: Option<Box<Expr>>,
+        body: Box<Expr>,
+    },
+
+    Var {
+        var_names: Vec<(String, Box<Expr>)>,
         body: Box<Expr>,
     },
 }
@@ -190,6 +202,8 @@ impl<'a> Parser<'a> {
     ///   ::= numberexpr
     ///   ::= parenexpr
     ///   ::= ifexpr
+    ///   ::= forexpr
+    ///   ::= varexpr
     fn parse_primary(&mut self) -> Result<Box<Expr>, String> {
         match self.current {
             Some(Token::Ident(_)) => self.parse_identifier(),
@@ -197,6 +211,7 @@ impl<'a> Parser<'a> {
             Some(Token::OpeningParenthesis) => self.parse_paren(),
             Some(Token::If) => self.parse_if(),
             Some(Token::For) => self.parse_for(),
+            Some(Token::Var) => self.parse_var(),
             _ => unexpected!("expression", self.current),
         }
     }
@@ -452,6 +467,50 @@ impl<'a> Parser<'a> {
         }))
     }
 
+    /// varexpr ::= 'var' identifier ('=' expression)?
+    ///                    (',' identifier ('=' expression)?)* 'in' expression
+    pub fn parse_var(&mut self) -> Result<Box<Expr>, String> {
+        // eat `var`
+        self.get_next_token();
+
+        let mut var_names = vec![];
+
+        loop {
+            let name = match self.current {
+                Some(Token::Ident(ref name)) => name.clone(),
+                _ => return unexpected!("identifier in `var` expression", self.current),
+            };
+            self.get_next_token(); // eat ident
+
+            let val = match self.current {
+                Some(Token::Other('=')) => {
+                    self.get_next_token();
+                    self.parse_expression()?
+                }
+                _ => Box::new(Expr::Number(0.0)),
+            };
+
+            var_names.push((name, val));
+
+            match self.current {
+                Some(Token::Comma) => self.get_next_token(),
+                _ => break,
+            }
+        }
+
+        match self.current {
+            Some(Token::In) => self.get_next_token(),
+            _ => return unexpected!("`in` keyword after `var`, got {:?}", self.current),
+        }
+
+        let body = self.parse_expression()?;
+
+        Ok(Box::new(Expr::Var {
+            var_names: var_names,
+            body: body,
+        }))
+    }
+
     /// definition ::= 'def' prototype expression
     pub fn parse_definition(&mut self) -> Result<Box<Function>, String> {
         // eat `def`
@@ -486,16 +545,11 @@ impl<'a> Parser<'a> {
     }
 
     fn operator_precedence(&self, op: char) -> u8 {
-        match op {
-            '<' => 10,
-            '+' | '-' => 20,
-            '*' | '/' => 40,
-            ch => *PRECEDENCE_TABLE
-                .lock()
-                .unwrap()
-                .get(&ch)
-                .expect("cannot find operator precedence"),
-        }
+        *PRECEDENCE_TABLE
+            .lock()
+            .unwrap()
+            .get(&op)
+            .expect("cannot find operator precedence")
     }
 }
 
