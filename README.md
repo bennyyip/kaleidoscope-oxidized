@@ -1,5 +1,5 @@
 # Kaleidoscope: Implementing a Language with LLVM
-A [Kaleidoscope](https://llvm.org/docs/tutorial/index.html) implementation in rust. Currently 6 out of 10 chapters are done.
+A [Kaleidoscope](https://llvm.org/docs/tutorial/index.html) implementation in rust. Currently 8 out of 10 chapters are done.
 
 # Example
 ```

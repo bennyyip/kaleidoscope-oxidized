@@ -390,7 +390,6 @@ impl<'a> Compiler<'a> {
         module: &'a Module,
         proto: &'a Prototype,
     ) -> Result<(), String> {
-        // TODO: move to codegen
         let f64_type: &BasicType = &context.f64_type();
         let param_types = ::std::iter::repeat(f64_type)
             .take(proto.args.len())
