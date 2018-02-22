@@ -6,6 +6,7 @@ use inkwell::passes::PassManager;
 use inkwell::types::BasicType;
 use inkwell::values::{BasicValue, FloatValue, FunctionValue, PointerValue};
 use inkwell::FloatPredicate;
+use inkwell::module::Linkage;
 use std::collections::HashMap;
 
 use parser::{Expr, Function, Prototype};
@@ -382,5 +383,32 @@ impl<'a> Compiler<'a> {
             fn_val_opt: None,
         };
         compiler.compile_function()
+    }
+
+    pub fn compile_extern(
+        context: &'a Context,
+        module: &'a Module,
+        proto: &'a Prototype,
+    ) -> Result<(), String> {
+        // TODO: move to codegen
+        let f64_type: &BasicType = &context.f64_type();
+        let param_types = ::std::iter::repeat(f64_type)
+            .take(proto.args.len())
+            .collect::<Vec<&BasicType>>();
+        let fn_type = context.f64_type().fn_type(&param_types, false);
+        let fn_val = module.add_function(&proto.name, &fn_type, Some(&Linkage::ExternalLinkage));
+
+        for (i, arg) in fn_val.params().enumerate() {
+            arg.into_float_value().set_name(&proto.args[i]);
+        }
+
+        if !fn_val.verify(true) {
+            unsafe {
+                fn_val.delete();
+            }
+            Err(format!("Invalid generated function `{}`", proto.name))
+        } else {
+            Ok(())
+        }
     }
 }

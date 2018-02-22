@@ -10,13 +10,10 @@ use std::fs::File;
 
 use inkwell::context::Context;
 use inkwell::passes::PassManager;
-use inkwell::targets::{InitializationConfig, Target};
+use inkwell::targets::{self, InitializationConfig, Target, TargetMachine};
 use inkwell::builder::Builder;
 use inkwell::module::Module;
 use inkwell::OptimizationLevel;
-
-use inkwell::module::Linkage;
-use inkwell::types::BasicType;
 
 use kaleidoscope::parser::*;
 use kaleidoscope::lexer::{Lexer, Token};
@@ -35,11 +32,15 @@ struct Opt {
     display_compiler_output: bool,
     #[structopt(short = "0", help = "Diable LLVM function pass managers")]
     no_optimization: bool,
-    #[structopt(short = "i", long = "input", parse(from_os_str), help = "input file")]
+    #[structopt(short = "i", long = "input", parse(from_os_str), help = "Input file")]
     input: Option<PathBuf>,
+    #[structopt(short = "o", long = "output", parse(from_os_str), help = "Output file")]
+    output: Option<PathBuf>,
+    #[structopt(long = "asm", help = "Output to assembly instead object code")]
+    asm: bool,
 }
 
-fn main() {
+fn run() -> Result<(), String> {
     let opt = Opt::from_args();
     let context = Context::create();
     let module = context.create_module("repl");
@@ -78,18 +79,12 @@ fn main() {
                     match parser.current() {
                         Some(Token::Def) => match handle_definition(&opt, &mut parser) {
                             Ok(function) => prev_defs.push(function),
-                            Err(err) => {
-                                println!("{}", err);
-                                std::process::exit(1);
-                            }
+                            Err(err) => return Err(err),
                         },
 
                         Some(Token::Extern) => match parser.parse_extern() {
                             Ok(proto) => prev_externs.push(proto),
-                            Err(err) => {
-                                println!("!> Error when emiting LLVM IR for extern def: {:?}", err);
-                                std::process::exit(1);
-                            }
+                            Err(err) => return Err(err),
                         },
 
                         Some(Token::Delimiter) => {
@@ -100,28 +95,64 @@ fn main() {
                             break;
                         }
 
-                        _ => match handle_top_level(
-                            &opt,
-                            &mut parser,
-                            &context,
-                            &builder,
-                            &fpm,
-                            &module,
-                        ) {
-                            Ok(_) => (),
-                            Err(err) => {
-                                println!("{}", err);
-                                std::process::exit(1);
-                            }
-                        },
+                        _ => return Err("top level expression is not currently suppported in source file".to_owned())
+
+                        // _ => match handle_top_level(
+                        //     &opt,
+                        //     &mut parser,
+                        //     &context,
+                        //     &builder,
+                        //     &fpm,
+                        //     &module,
+                        // ) {
+                        //     Ok(_) => (),
+                        //     Err(err) => return Err(err),
+                        // },
                     }
                 }
             }
             Err(err) => {
-                println!("Cannot open file: {:?}", err);
-                std::process::exit(1);
+                return Err(format!("{:?}", err));
             }
         }
+    }
+
+    if let Some(ref output) = opt.output {
+        let target = Target::get_first().unwrap();
+        let triple = TargetMachine::get_default_triple().to_string_lossy();
+        let cpu = "generic";
+        let features = "";
+        let level = OptimizationLevel::default();
+        let reloc_mode = targets::RelocMode::Default;
+        let code_model = targets::CodeModel::Default;
+        let target_machine = target
+            .create_target_machine(&triple, cpu, features, level, reloc_mode, code_model)
+            .unwrap();
+
+        let filetype = if opt.asm {
+            targets::FileType::Assembly
+        } else {
+            targets::FileType::Object
+        };
+
+        // compile externs
+        for proto in &prev_externs {
+            Compiler::compile_extern(&context, &module, &proto)?;
+        }
+
+        // compile functions
+        for expr in &prev_defs {
+            match Compiler::compile(&context, &builder, &fpm, &module, expr) {
+                Ok(_) => (),
+                Err(err) => println!(
+                    "!> Error when emiting LLVM IR for function definition: {:?}",
+                    err
+                ),
+            }
+        }
+
+        target_machine.write_to_file(&module, filetype, output)?;
+        return Ok(());
     }
 
     // REPL
@@ -153,25 +184,7 @@ fn main() {
 
         // compile externs
         for proto in &prev_externs {
-            // TODO: move to codegen
-            let f64_type: &BasicType = &context.f64_type();
-            let param_types = ::std::iter::repeat(f64_type)
-                .take(proto.args.len())
-                .collect::<Vec<&BasicType>>();
-            let fn_type = context.f64_type().fn_type(&param_types, false);
-            let fn_val =
-                module.add_function(&proto.name, &fn_type, Some(&Linkage::ExternalLinkage));
-
-            for (i, arg) in fn_val.params().enumerate() {
-                arg.into_float_value().set_name(&proto.args[i]);
-            }
-
-            if !fn_val.verify(true) {
-                unsafe {
-                    fn_val.delete();
-                }
-                println!("Invalid generated function");
-            }
+            Compiler::compile_extern(&context, &module, &proto)?;
         }
 
         // compile functions
@@ -218,6 +231,17 @@ fn main() {
                 Err(err) => println!("{}", err),
             },
         }
+    }
+    Ok(())
+}
+
+fn main() {
+    match run() {
+        Err(err) => {
+            println!("error: {:?}", err);
+            std::process::exit(1);
+        }
+        _ => (),
     }
 }
 
